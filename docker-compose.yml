@@ -1,0 +1,51 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: portal
+    ports: ["5432:5432"]
+    volumes: ["pg:/var/lib/postgresql/data"]
+
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+
+  app:
+    build: .
+    command: node src/server.js
+    environment:
+      DB_HOST: db
+      DB_USER: admin
+      DB_PASS: admin
+      DB_NAME: portal
+      DB_DIALECT: postgres
+      REDIS_HOST: redis
+      JWT_SECRET: supersecret
+      NODE_ENV: development
+    ports: ["3000:3000"]
+    depends_on: [db, redis]
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  worker:
+    build: .
+    command: node src/worker.js
+    environment:
+      DB_HOST: db
+      DB_USER: admin
+      DB_PASS: admin
+      DB_NAME: portal
+      DB_DIALECT: postgres
+      REDIS_HOST: redis
+      NODE_ENV: development
+    depends_on: [db, redis]
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  pg:
