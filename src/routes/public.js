@@ -117,7 +117,7 @@ router.post("/articles", async (req, res) => {
     page = 1,
     pageSize = 10,
     sort = "publishedAt:desc",
-  } = req.body; // agora vem do body
+  } = req.body;
   const [sortField, sortDir] = sort.split(":");
 
   const where = { status: "published" };
@@ -135,10 +135,19 @@ router.post("/articles", async (req, res) => {
     { model: Tag, as: "tags", through: { attributes: [] } },
   ];
 
+  if (category) {
+    const categoryInclude = include.find((i) => i.model === Category);
+    if (categoryInclude) {
+      categoryInclude.where = { slug: category };
+      categoryInclude.required = true;
+    }
+  }
+
   const tagFilter = tags ? tags.split(",").map((t) => t.trim()) : null;
 
   const result = await Article.findAndCountAll({
     where,
+
     include: tagFilter
       ? [
           ...include,
@@ -153,6 +162,7 @@ router.post("/articles", async (req, res) => {
     order: [[sortField || "publishedAt", (sortDir || "desc").toUpperCase()]],
     limit: +pageSize,
     offset: (+page - 1) * +pageSize,
+    distinct: true,
   });
 
   res.json({
