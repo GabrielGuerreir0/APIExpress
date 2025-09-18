@@ -4,6 +4,7 @@ const authorize = require("../middleware/authorize");
 const { Article, Tag, Category } = require("../models");
 const slugify = require("../utils/slugify");
 const { z } = require("zod");
+const { Op } = require("sequelize");
 const {
   createArticleSchema,
   updateArticleSchema,
@@ -153,28 +154,47 @@ router.post(
  */
 router.patch(
   "/articles/:id",
-  authorize({ roles: ["EDITOR"], allowOwner: true, loadResource: loadArticle }),
+  authorize({ roles: ["EDITOR", "JOURNALIST"], loadResource: loadArticle }),
   async (req, res) => {
-    const body = updateArticleSchema.parse(req.body);
-    const article = await loadArticle(req);
-    if (!article) return res.status(404).json({ error: "Não encontrado" });
+    try {
+      const article = await loadArticle(req);
 
-    if (body.title && !body.slug) {
-      article.slug = slugify(body.title);
-    }
-    await article.update(body);
+      if (!article) {
+        return res.status(404).json({ error: "Artigo não encontrado" });
+      }
 
-    if (body.tagSlugs) {
-      const tags = await Tag.findAll({ where: { slug: body.tagSlugs } });
-      await article.setTags(tags);
+      // Somente editores ou o próprio jornalista podem atualizar
+      if (req.user.role === "JOURNALIST" && article.authorId !== req.user.id) {
+        return res
+          .status(403)
+          .json({ error: "Você não tem permissão para atualizar este artigo" });
+      }
+
+      const body = updateArticleSchema.parse(req.body);
+
+      if (body.title && !body.slug) {
+        article.slug = slugify(body.title);
+      }
+
+      await article.update(body);
+
+      if (body.tagSlugs) {
+        const tags = await Tag.findAll({ where: { slug: body.tagSlugs } });
+        await article.setTags(tags);
+      }
+
+      if (body.categorySlug) {
+        const category = await Category.findOne({
+          where: { slug: body.categorySlug },
+        });
+        if (category) await article.setCategory(category);
+      }
+
+      res.json(article);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Erro ao atualizar artigo" });
     }
-    if (body.categorySlug) {
-      const category = await Category.findOne({
-        where: { slug: body.categorySlug },
-      });
-      if (category) await article.setCategory(category);
-    }
-    res.json(article);
   }
 );
 
@@ -205,12 +225,24 @@ router.patch(
  */
 router.delete(
   "/articles/:id",
-  authorize({ roles: ["EDITOR"], allowOwner: true, loadResource: loadArticle }),
+  authorize({
+    roles: ["EDITOR", "JOURNALIST"],
+    allowOwner: true, // permite que o dono delete
+    loadResource: loadArticle,
+  }),
   async (req, res) => {
-    const article = await loadArticle(req);
-    if (!article) return res.status(404).end();
-    await article.destroy();
-    res.status(204).end();
+    try {
+      const article = await loadArticle(req);
+
+      if (!article)
+        return res.status(404).json({ error: "Artigo não encontrado" });
+
+      await article.destroy();
+      res.status(204).end();
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Erro ao deletar artigo" });
+    }
   }
 );
 
@@ -236,10 +268,33 @@ router.get(
   "/articles",
   authorize({ roles: ["JOURNALIST", "EDITOR"] }),
   async (req, res) => {
-    const data = await Article.findAll({
-      include: [{ all: true, nested: true }],
-    });
-    res.json(data);
+    try {
+      const { q } = req.query;
+
+      const conditions = [];
+
+      // Jornalista vê só os próprios artigos
+      if (req.user.role === "JOURNALIST") {
+        conditions.push({ authorId: req.user.id });
+      }
+
+      // Filtro de busca no título
+      if (q) {
+        conditions.push({ title: { [Op.iLike]: `%${q}%` } });
+      }
+
+      const where = conditions.length ? { [Op.and]: conditions } : {};
+
+      const articles = await Article.findAll({
+        where,
+        order: [["publishedAt", "DESC"]],
+      });
+
+      res.json(articles);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Erro ao buscar artigos" });
+    }
   }
 );
 
