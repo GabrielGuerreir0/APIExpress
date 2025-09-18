@@ -74,7 +74,7 @@ router.get("/articles/id/:id", async (req, res) => {
     const article = await Article.findOne({
       where: { id, status: "published" },
       include: [
-        { model: Category }, // ✅ sem alias
+        { model: Category, as: "category" },
         { model: User, as: "author", attributes: ["id", "name"] },
         { model: Tag, as: "tags", through: { attributes: [] } },
       ],
